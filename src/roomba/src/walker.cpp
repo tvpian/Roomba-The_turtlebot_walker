@@ -86,7 +86,7 @@ void roomba::update_callback() {
   static uint8_t turtlebot3_state_num = 0;
   double escape_range = 30.0 * DEG2RAD;
   double check_forward_dist = 0.7;
-  double check_side_dist = 0.6;
+  const double check_side_dist = 0.6;
 
   switch (turtlebot3_state_num) {
     case GET_TB3_DIRECTION:
