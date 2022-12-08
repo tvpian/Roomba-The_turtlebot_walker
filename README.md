@@ -25,7 +25,7 @@ Open new terminal window and type the following:
 ```
 mkdir ros2_ws/src
 cd ros2_ws/src
-git clone https://github.com/tvpian/beginner_tutorials.git
+git clone https://github.com/tvpian/roomba_turtlebot_walker.git
 cd ..
 source <path to ros2 setup>/install/setup.bash    
 colcon build
