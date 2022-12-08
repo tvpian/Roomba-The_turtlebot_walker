@@ -1,2 +1,1 @@
 Done processing ./src/roomba/src/walker.cpp
-Total errors found: 2
