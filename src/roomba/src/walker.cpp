@@ -1,146 +1,72 @@
-// "Copyright[2022] by Tharun V. Puthanveettil"
-#include "roomba/walker.hpp"
-
+//  "Copyright[2022] by Tharun V. Puthanveettil"
+#include <chrono>
+#include <functional>
 #include <memory>
-
+#include "rclcpp/rclcpp.hpp"
+#include "geometry_msgs/msg/twist.hpp"
+#include "sensor_msgs/msg/laser_scan.hpp"
 using namespace std::chrono_literals;
+using std::placeholders::_1;
 
-/**
- * @brief Construct a new roomba::roomba object
- * 
- */
-roomba::roomba()
-: Node("turtlebot3_drive_node") {
-  scan_data_[0] = 0.0;
-  scan_data_[1] = 0.0;
-  scan_data_[2] = 0.0;
 
-  robot_pose_ = 0.0;
-  prev_robot_pose_ = 0.0;
 
-  auto qos = rclcpp::QoS(rclcpp::KeepLast(10));
+class roomba : public rclcpp::Node {
+ public:
+  roomba();
 
-  // Initialise publishers
-  cmd_vel_pub_ =
-  this->create_publisher<geometry_msgs::msg::Twist>("cmd_vel", qos);
+ private:
+  void move();
+  void detectObstacles(const sensor_msgs::msg::LaserScan::SharedPtr msg);
+  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr publisher_;
+  rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr subscriber_;
+  geometry_msgs::msg::Twist commandVelocity;
+  bool obstacleFound;
+};
 
-  // Initialise subscribers
-  scan_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
-    "scan", \
-    rclcpp::SensorDataQoS(), \
-    std::bind(
-      &roomba::lidar_callback, \
-      this, \
-      std::placeholders::_1));
-  odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-    "odom", qos,
-     std::bind(&roomba::odom_callback, this, std::placeholders::_1));
-
-  update_timer_ = this->create_wall_timer(10ms,
-   std::bind(&roomba::update_callback, this));
-
-  RCLCPP_INFO(this->get_logger(),
-   "Turtlebot3 simulation node has been initialised");
+roomba::roomba() : Node("roomba_walker"), obstacleFound(false) {
+  auto sensor_qos = rclcpp::QoS(rclcpp::SensorDataQoS());
+  publisher_ =
+      this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
+  timer_ = this->create_wall_timer(100ms, std::bind(&roomba::move, this));
+  subscriber_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
+      "/scan", sensor_qos, std::bind(&roomba::detectObstacles, this, _1));
 }
 
-roomba::~roomba() {
-  RCLCPP_INFO(this->get_logger(),
-   "Turtlebot3 simulation node has been terminated");
+void roomba::move() {
+  if (obstacleFound) {
+    commandVelocity.linear.x = 0.0;
+    commandVelocity.angular.z = 0.4;
+  } else {
+    commandVelocity.linear.x = 0.1;
+    commandVelocity.angular.z = 0.0;
+  }
+  publisher_->publish(commandVelocity);
 }
 
-void roomba::odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg) {
-  tf2::Quaternion q(
-    msg->pose.pose.orientation.x,
-    msg->pose.pose.orientation.y,
-    msg->pose.pose.orientation.z,
-    msg->pose.pose.orientation.w);
-  tf2::Matrix3x3 m(q);
-  double roll, pitch, yaw;
-  m.getRPY(roll, pitch, yaw);
-
-  robot_pose_ = yaw;
-}
-
-void roomba::lidar_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
-  uint16_t scan_angle[3] = {0, 30, 330};
-
-  for (int num = 0; num < 3; num++) {
-    if (std::isinf(msg->ranges.at(scan_angle[num]))) {
-      scan_data_[num] = msg->range_max;
-    } else {
-      scan_data_[num] = msg->ranges.at(scan_angle[num]);
+void roomba::detectObstacles(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
+  obstacleFound = false;
+  float range;
+  for (int i = 0; i < 50; i++) {
+    range = msg->ranges[i];
+    if (range < 0.3) {
+      obstacleFound = true;
+      break;
+    }
+  }
+  for (int i = 290; i < 359; i++) {
+    range = msg->ranges[i];
+    if (range < 0.3) {
+      obstacleFound = true;
+      break;
     }
   }
 }
 
-void roomba::update_cmd_vel(double linear, double angular) {
-  geometry_msgs::msg::Twist cmd_vel;
-  cmd_vel.linear.x = linear;
-  cmd_vel.angular.z = angular;
-
-  cmd_vel_pub_->publish(cmd_vel);
-}
-
-
-void roomba::update_callback() {
-  static uint8_t turtlebot3_state_num = 0;
-  double escape_range = 30.0 * DEG2RAD;
-  double check_forward_dist = 0.7;
-  const double check_side_dist = 0.6;
-
-  switch (turtlebot3_state_num) {
-    case GET_TB3_DIRECTION:
-      if (scan_data_[CENTER] > check_forward_dist) {
-        if (scan_data_[LEFT] < check_side_dist) {
-          prev_robot_pose_ = robot_pose_;
-          turtlebot3_state_num = TB3_RIGHT_TURN;
-        } else if (scan_data_[RIGHT] < check_side_dist) {
-          prev_robot_pose_ = robot_pose_;
-          turtlebot3_state_num = TB3_LEFT_TURN;
-        } else {
-          turtlebot3_state_num = TB3_DRIVE_FORWARD;
-        }
-      }
-
-      if (scan_data_[CENTER] < check_forward_dist) {
-        prev_robot_pose_ = robot_pose_;
-        turtlebot3_state_num = TB3_RIGHT_TURN;
-      }
-      break;
-
-    case TB3_DRIVE_FORWARD:
-      update_cmd_vel(LINEAR_VELOCITY, 0.0);
-      turtlebot3_state_num = GET_TB3_DIRECTION;
-      break;
-
-    case TB3_RIGHT_TURN:
-      if (fabs(prev_robot_pose_ - robot_pose_) >= escape_range) {
-        turtlebot3_state_num = GET_TB3_DIRECTION;
-      } else {
-        update_cmd_vel(0.0, -1 * ANGULAR_VELOCITY);
-      }
-      break;
-
-    case TB3_LEFT_TURN:
-      if (fabs(prev_robot_pose_ - robot_pose_) >= escape_range) {
-        turtlebot3_state_num = GET_TB3_DIRECTION;
-      } else {
-        update_cmd_vel(0.0, ANGULAR_VELOCITY);
-      }
-      break;
-
-    default:
-      turtlebot3_state_num = GET_TB3_DIRECTION;
-      break;
-  }
-}
-
-
-int main(int argc, char ** argv) {
+int main(int argc, char * argv[]) {
   rclcpp::init(argc, argv);
   rclcpp::spin(std::make_shared<roomba>());
   rclcpp::shutdown();
-
   return 0;
 }
 
