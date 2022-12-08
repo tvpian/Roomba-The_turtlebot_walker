@@ -47,7 +47,7 @@ Open a new terminal window and type:
 cd ros2_ws
 source <path to ros2 setup>/install/setup.bash    
 source install/setup.bash 
-ros2 launch src/launch/launch_roomba.py enable_recording:=True
+ros2 launch launch/launch_roomba.py enable_recording:=True
 ```
 
     - output:
